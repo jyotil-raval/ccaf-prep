@@ -1,6 +1,9 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import { runAgentLoop } from './loop.js';
 import type { AgentLoopOptions } from './types.js';
+import { ResearcherAgent } from './subagents/researcher.js';
+import { ValidatorAgent, type ValidationResult } from './subagents/validator.js';
+import { extractText, sanitizeForAgentInput } from './utils.js';
 
 export interface Subtask {
   readonly id: string;
@@ -22,10 +25,7 @@ export async function decomposeTask(userRequest: string, options: AgentLoopOptio
     tools: []
   });
 
-  const text = response.content
-    .filter((block): block is Anthropic.TextBlock => block.type === 'text')
-    .map((block) => block.text)
-    .join('');
+  const text = extractText(response);
 
   let parsed: unknown;
   try {
@@ -115,4 +115,20 @@ export async function compareSequentialVsParallel(subtasks: readonly Subtask[], 
   console.log(`sequential: ${seqEnd - seqStart}ms, parallel: ${parEnd - parStart}ms`);
 
   return { sequential, parallel };
+}
+
+export async function orchestrateResearchAndValidate(
+  task: string,
+  criteria: string,
+  options: AgentLoopOptions,
+): Promise<{ research: Anthropic.Message; validation: ValidationResult }> {
+  const researcher = new ResearcherAgent();
+  const research = await researcher.run(task, options);
+
+  const researchText = extractText(research);
+
+  const validator = new ValidatorAgent();
+  const validation = await validator.validate(sanitizeForAgentInput(researchText), criteria, options);
+
+  return { research, validation };
 }
